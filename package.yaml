@@ -1,12 +1,13 @@
 name: craze
-version: 0.0.1.0
+version: 0.0.1.1
 synopsis: HTTP Racing Library
+description: A micro-library for racing HTTP GET requests
 maintainer: Eduardo Trujillo <ed@chromabits.com>
 license: MIT
 github: etcinit/craze
 category: Web
 
-ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -Werror -fno-warn-unused-do-bind
+ghc-options: -Wall
 
 dependencies:
   - base >= 4.7 && < 5
@@ -22,6 +23,7 @@ library:
 
 executables:
   craze-example:
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -fno-warn-unused-do-bind
     main: Main.hs
     source-dirs: app
     dependencies:
@@ -31,6 +33,7 @@ executables:
 
 tests:
   craze-spec:
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -fno-warn-unused-do-bind
     main: Spec.hs
     source-dirs: test
     dependencies:
@@ -41,6 +44,7 @@ tests:
       - haxy
       - HTTP
   craze-doctest:
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -fno-warn-unused-do-bind
     main: Doctest.hs
     source-dirs: test
     dependencies:
