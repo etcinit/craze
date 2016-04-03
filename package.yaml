@@ -1,0 +1,49 @@
+name: craze
+version: 0.0.1.0
+synopsis: HTTP Racing Library
+maintainer: Eduardo Trujillo <ed@chromabits.com>
+license: MIT
+github: etcinit/craze
+category: Web
+
+ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -Werror -fno-warn-unused-do-bind
+
+dependencies:
+  - base >= 4.7 && < 5
+  - curl
+  - bytestring
+  - transformers
+
+library:
+  source-dirs: src
+  dependencies:
+    - async
+    - data-default-class
+
+executables:
+  craze-example:
+    main: Main.hs
+    source-dirs: app
+    dependencies:
+      - craze
+      - optparse-generic
+      - text
+
+tests:
+  craze-spec:
+    main: Spec.hs
+    source-dirs: test
+    dependencies:
+      - craze
+      - hspec
+      - hspec-discover
+      - http-types
+      - haxy
+      - HTTP
+  craze-doctest:
+    main: Doctest.hs
+    source-dirs: test
+    dependencies:
+      - craze
+      - doctest
+      - doctest-discover
