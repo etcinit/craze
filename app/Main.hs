@@ -27,7 +27,9 @@ main = do
 
   let clientCount = (unHelpful . clients) opts
   let racer = defaultRacer
-               { racerProviders = map ((const . return) []) [1..clientCount]
+               { racerProviders
+                   = ((const . return) defaultProviderOptions) 
+                   <$> [1..clientCount]
                , racerDebug = (debug opts)
                }
 

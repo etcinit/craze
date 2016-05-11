@@ -1,7 +1,7 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleInstances  #-}
+{-# LANGUAGE GADTs              #-}
 {-# LANGUAGE ImpredicativeTypes #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes         #-}
 
 -- | Craze is a small module for performing multiple similar HTTP GET requests
 -- in parallel. This is performed through the `raceGet` function, which will
@@ -27,7 +27,10 @@
 --
 -- >>> :{
 --  let racer = (Racer
---                { racerProviders = [return [], return []]
+--                { racerProviders =
+--                    [ return defaultProviderOptions
+--                    , return defaultProviderOptions
+--                    ]
 --                , racerHandler = return . respStatus
 --                , racerChecker = (200 ==)
 --                , racerDebug = False
@@ -41,15 +44,22 @@ module Network.Craze (
     RacerHandler
   , RacerChecker
   , Racer(..)
+  , ProviderOptions(..)
   -- * Functions
   , defaultRacer
+  , defaultProviderOptions
   , raceGet
+  -- * Providers
+  , simple
+  , delayed
   ) where
 
-import Data.ByteString (ByteString)
-import Data.Default.Class (Default, def)
-import Network.Curl
+import Control.Concurrent       (threadDelay)
 import Control.Concurrent.Async
+import Control.Monad            (when)
+import Data.ByteString          (ByteString)
+import Data.Default.Class       (Default, def)
+import Network.Curl
 
 -- | A `RacerHandler` is simply a function for transforming a response after it
 -- is received. The handler is only applied to successful requests before they
@@ -68,21 +78,34 @@ type RacerHandler headerTy bodyTy a = CurlResponse_ headerTy bodyTy -> IO a
 -- Limitting, etc).
 type RacerChecker a = a -> Bool
 
--- | A function that returns a list of `CurlOption`s to use for making a
--- request.
-type RacerProvider = IO [CurlOption]
+-- | A function that returns the @ProviderOptions@ to use for making a request.
+type RacerProvider = IO ProviderOptions
+
+-- | Options for a specific provider.
+data ProviderOptions = ProviderOptions
+  { -- | Options to pass down to Curl.
+    poOptions :: [CurlOption]
+    -- | Number of microseconds to delay the request by.
+  , poDelay   :: Maybe Int
+  }
+
+instance Default ProviderOptions where
+  def = ProviderOptions
+    { poOptions = []
+    , poDelay = Nothing
+    }
 
 -- | A record describing the rules for racing requests.
 data Racer headerTy bodyTy a = Racer
-  { racerHandler :: RacerHandler headerTy bodyTy a
-  , racerChecker :: RacerChecker a
+  { racerHandler   :: RacerHandler headerTy bodyTy a
+  , racerChecker   :: RacerChecker a
   -- | On a `Racer`, each `RaceProvider` represents a separate client
   -- configuration. When performing a race, each provider will be used to spwan
   -- a client and perform a request. This allows one to control the number of
   -- requests performed and with which `CurlOption`s.
   , racerProviders :: [RacerProvider]
   -- | When set to `True`, debugging messages will be written to stdout.
-  , racerDebug :: Bool
+  , racerDebug     :: Bool
   }
 
 instance Default (Racer [(String,String)] ByteString ByteString) where
@@ -103,10 +126,26 @@ instance Default (Racer [(String,String)] ByteString ByteString) where
 -- @
 --
 -- If this is not the desired behavior, or if the response should be parsed or
--- processed, you should use the `Racer` constructor directly and provide all 
+-- processed, you should use the `Racer` constructor directly and provide all
 -- fields.
 defaultRacer :: Racer [(String,String)] ByteString ByteString
 defaultRacer = def
+
+-- | A default set of options for a provider.
+defaultProviderOptions :: ProviderOptions
+defaultProviderOptions = def
+
+-- | A simple provider. It does not delay requests.
+simple :: [CurlOption] -> IO ProviderOptions
+simple xs = pure $ def { poOptions = xs }
+
+-- | A provider which will delay a request by the provided number of 
+-- microseconds.
+delayed :: [CurlOption] -> Int -> IO ProviderOptions
+delayed xs d = pure $ def
+  { poOptions = xs
+  , poDelay = Just d
+  }
 
 -- | Perform a GET request on the provided URL using all providers in
 -- parallel.
@@ -132,11 +171,9 @@ raceGet
 raceGet r url = do
   asyncs <- mapM performGetAsync_ (racerProviders r)
 
-  if (racerDebug r) 
-  then do
+  when (racerDebug r) $ do
     putStr "[racer] Created Asyncs: "
     print (map asyncThreadId asyncs)
-  else return ()
 
   waitForOne asyncs (racerHandler r) (racerChecker r) (racerDebug r)
     where
@@ -164,11 +201,7 @@ waitForOne asyncs handler check debug
         if check result then do
           cancelAll (except as asyncs)
 
-          if debug 
-          then do
-            putStr "[racer] Winner: "
-            print (asyncThreadId as)
-          else return ()
+          when debug $ putStr "[racer] Winner: " >> print (asyncThreadId as)
 
           pure $ Just result
         else waitForOne (except as asyncs) handler check debug
@@ -178,12 +211,19 @@ cancelAll :: [Async a] -> IO ()
 cancelAll = mapM_ (async . cancel)
 
 except :: (Eq a) => a -> [a] -> [a]
-except x xs = filter (x /=) xs
+except x = filter (x /=)
 
 performGetAsync
   :: (CurlHeader ht, CurlBuffer bt)
   => URLString
   -> RacerProvider
   -> IO (Async (CurlResponse_ ht bt))
-performGetAsync url provider = async $ provider >>= curlGetResponse_ url
+performGetAsync url provider = async $ do
+  options <- provider
+
+  case poDelay options of
+    Nothing -> pure ()
+    Just delay -> threadDelay delay
+
+  curlGetResponse_ url (poOptions options)
 
