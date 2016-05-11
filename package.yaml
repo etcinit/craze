@@ -1,5 +1,5 @@
 name: craze
-version: 0.1.0.0
+version: 0.1.1.0
 synopsis: HTTP Racing Library
 description: A micro-library for racing HTTP GET requests
 maintainer: Eduardo Trujillo <ed@chromabits.com>
@@ -14,12 +14,14 @@ dependencies:
   - curl
   - bytestring
   - transformers
+  - text
 
 library:
   source-dirs: src
   dependencies:
     - async
     - data-default-class
+    - containers
 
 executables:
   craze-example:
@@ -29,7 +31,6 @@ executables:
     dependencies:
       - craze
       - optparse-generic
-      - text
 
 tests:
   craze-spec:

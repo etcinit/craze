@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE GADTs              #-}
 {-# LANGUAGE ImpredicativeTypes #-}
+{-# LANGUAGE OverloadedStrings  #-}
 {-# LANGUAGE RankNTypes         #-}
 
 -- | Craze is a small module for performing multiple similar HTTP GET requests
@@ -45,21 +46,35 @@ module Network.Craze (
   , RacerChecker
   , Racer(..)
   , ProviderOptions(..)
+  , RacerResult
   -- * Functions
   , defaultRacer
   , defaultProviderOptions
   , raceGet
+  , raceGetResult
   -- * Providers
   , simple
+  , simpleTagged
   , delayed
+  , delayedTagged
+  -- * Results
+  , rrResponse
+  , rrWinner
+  , rrProviders
   ) where
 
-import Control.Concurrent       (threadDelay)
-import Control.Concurrent.Async
-import Control.Monad            (when)
-import Data.ByteString          (ByteString)
-import Data.Default.Class       (Default, def)
-import Network.Curl
+import           Control.Concurrent       (threadDelay)
+import           Control.Concurrent.Async
+import           Control.Monad            (when)
+import           Data.ByteString          (ByteString)
+import           Data.Default.Class       (Default, def)
+import           Data.Map.Lazy            (Map, delete, elems, fromList, keys,
+                                           lookup, mapWithKey)
+import           Data.Monoid              ((<>))
+import           Data.Text                (Text, pack)
+import qualified Data.Text.IO             as TIO
+import           Network.Curl
+import           Prelude                  hiding (lookup)
 
 -- | A `RacerHandler` is simply a function for transforming a response after it
 -- is received. The handler is only applied to successful requests before they
@@ -87,13 +102,24 @@ data ProviderOptions = ProviderOptions
     poOptions :: [CurlOption]
     -- | Number of microseconds to delay the request by.
   , poDelay   :: Maybe Int
-  }
+    -- | A tag to identify this type provider.
+  ,  poTag    :: Text
+  } deriving (Show)
 
 instance Default ProviderOptions where
   def = ProviderOptions
     { poOptions = []
     , poDelay = Nothing
+    , poTag = "default"
     }
+
+-- | The result of a racing operation. This can be used to collect statistics
+-- on which providers win more often, etc.
+data RacerResult a = RacerResult
+  { rrResponse  :: Maybe a
+  , rrWinner    :: Maybe ProviderOptions
+  , rrProviders :: [RacerProvider]
+  }
 
 -- | A record describing the rules for racing requests.
 data Racer headerTy bodyTy a = Racer
@@ -139,13 +165,25 @@ defaultProviderOptions = def
 simple :: [CurlOption] -> IO ProviderOptions
 simple xs = pure $ def { poOptions = xs }
 
--- | A provider which will delay a request by the provided number of 
+-- | Like @simple@, but with a tag for identification.
+simpleTagged :: [CurlOption] -> Text -> IO ProviderOptions
+simpleTagged xs t = do
+  opts <- simple xs
+  pure $ opts { poTag = t }
+
+-- | A provider which will delay a request by the provided number of
 -- microseconds.
 delayed :: [CurlOption] -> Int -> IO ProviderOptions
 delayed xs d = pure $ def
   { poOptions = xs
   , poDelay = Just d
   }
+
+-- | Like @delayed@, but with a tag for identification.
+delayedTagged :: [CurlOption] -> Int -> Text -> IO ProviderOptions
+delayedTagged xs d t = do
+  opts <- delayed xs d
+  pure $ opts { poTag = t }
 
 -- | Perform a GET request on the provided URL using all providers in
 -- parallel.
@@ -168,44 +206,68 @@ raceGet
   => Racer ht bt a
   -> URLString
   -> IO (Maybe a)
-raceGet r url = do
-  asyncs <- mapM performGetAsync_ (racerProviders r)
+raceGet r url = rrResponse <$> raceGetResult r url
+
+-- | Same as @raceGet@, but returns a @RacerResult@ which contains more
+-- information about the race performed.
+raceGetResult
+  :: (Eq a, CurlHeader ht, CurlBuffer bt)
+  => Racer ht bt a
+  -> URLString
+  -> IO (RacerResult a)
+raceGetResult r url = do
+  asyncs <- fromList <$> (mapM performGetAsync_ (racerProviders r))
 
   when (racerDebug r) $ do
-    putStr "[racer] Created Asyncs: "
-    print (map asyncThreadId asyncs)
+    TIO.putStr "[racer] Created Asyncs: "
+    print . elems $ mapWithKey identifier asyncs
 
-  waitForOne asyncs (racerHandler r) (racerChecker r) (racerDebug r)
+  maybeResponse <- waitForOne
+    asyncs (racerHandler r) (racerChecker r) (racerDebug r)
+
+  pure $ case maybeResponse of
+    Nothing -> RacerResult
+      { rrResponse = Nothing
+      , rrWinner = Nothing
+      , rrProviders = racerProviders r
+      }
+    Just (as, response) -> RacerResult
+      { rrResponse = Just response
+      , rrWinner = lookup as asyncs
+      , rrProviders = racerProviders r
+      }
     where
       performGetAsync_
         :: (CurlHeader ht, CurlBuffer bt)
         => RacerProvider
-        -> IO (Async (CurlResponse_ ht bt))
+        -> IO (Async (CurlResponse_ ht bt), ProviderOptions)
       performGetAsync_ = performGetAsync url
 
 waitForOne
   :: (Eq a)
-  => [Async (CurlResponse_ ht bt)]
+  => Map (Async (CurlResponse_ ht bt)) ProviderOptions
   -> RacerHandler ht bt a
   -> RacerChecker a
   -> Bool
-  -> IO (Maybe a)
+  -> IO (Maybe (Async (CurlResponse_ ht bt), a))
 waitForOne asyncs handler check debug
   = if null asyncs then pure Nothing else do
-    winner <- waitAnyCatch asyncs
+    winner <- waitAnyCatch (keys asyncs)
 
     case winner of
       (as, Right a) -> do
         result <- handler a
 
         if check result then do
-          cancelAll (except as asyncs)
+          cancelAll (keys $ delete as asyncs)
 
-          when debug $ putStr "[racer] Winner: " >> print (asyncThreadId as)
+          when debug $ do
+            TIO.putStr "[racer] Winner: "
+            print (asyncThreadId as)
 
-          pure $ Just result
-        else waitForOne (except as asyncs) handler check debug
-      (as, Left _) -> waitForOne (except as asyncs) handler check debug
+          pure $ Just (as, result)
+        else waitForOne (delete as asyncs) handler check debug
+      (as, Left _) -> waitForOne (delete as asyncs) handler check debug
 
 cancelAll :: [Async a] -> IO ()
 cancelAll = mapM_ (async . cancel)
@@ -213,17 +275,23 @@ cancelAll = mapM_ (async . cancel)
 except :: (Eq a) => a -> [a] -> [a]
 except x = filter (x /=)
 
+identifier :: (Async (CurlResponse_ ht bt)) -> ProviderOptions -> Text
+identifier a o = (poTag o) <> ":" <> (pack . show . asyncThreadId $ a)
+
 performGetAsync
   :: (CurlHeader ht, CurlBuffer bt)
   => URLString
   -> RacerProvider
-  -> IO (Async (CurlResponse_ ht bt))
-performGetAsync url provider = async $ do
+  -> IO (Async (CurlResponse_ ht bt), ProviderOptions)
+performGetAsync url provider = do
   options <- provider
 
-  case poDelay options of
-    Nothing -> pure ()
-    Just delay -> threadDelay delay
+  responseAsync <- async $ do
+    case poDelay options of
+      Nothing -> pure ()
+      Just delay -> threadDelay delay
 
-  curlGetResponse_ url (poOptions options)
+    curlGetResponse_ url (poOptions options)
+
+  pure (responseAsync, options)
 
