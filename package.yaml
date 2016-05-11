@@ -1,5 +1,5 @@
 name: craze
-version: 0.0.1.1
+version: 0.1.0.0
 synopsis: HTTP Racing Library
 description: A micro-library for racing HTTP GET requests
 maintainer: Eduardo Trujillo <ed@chromabits.com>
