@@ -35,6 +35,7 @@
 --                , racerHandler = return . respStatus
 --                , racerChecker = (200 ==)
 --                , racerDebug = False
+--                , racerReturnLast = False
 --                } :: Racer [(String, String)] ByteString Int)
 --  in (raceGet racer "https://chromabits.com" >>= print)
 -- :}
@@ -103,7 +104,7 @@ data ProviderOptions = ProviderOptions
     -- | Number of microseconds to delay the request by.
   , poDelay   :: Maybe Int
     -- | A tag to identify this type provider.
-  ,  poTag    :: Text
+  , poTag     :: Text
   } deriving (Show)
 
 instance Default ProviderOptions where
@@ -123,15 +124,19 @@ data RacerResult a = RacerResult
 
 -- | A record describing the rules for racing requests.
 data Racer headerTy bodyTy a = Racer
-  { racerHandler   :: RacerHandler headerTy bodyTy a
-  , racerChecker   :: RacerChecker a
+  { racerHandler    :: RacerHandler headerTy bodyTy a
+  , racerChecker    :: RacerChecker a
   -- | On a `Racer`, each `RaceProvider` represents a separate client
   -- configuration. When performing a race, each provider will be used to spwan
   -- a client and perform a request. This allows one to control the number of
   -- requests performed and with which `CurlOption`s.
-  , racerProviders :: [RacerProvider]
+  , racerProviders  :: [RacerProvider]
   -- | When set to `True`, debugging messages will be written to stdout.
-  , racerDebug     :: Bool
+  , racerDebug      :: Bool
+  -- | When set to `True`, the Racer will attempt to return the last response
+  -- in the event that all responses failed to pass the checker. This can be
+  -- used for identifying error conditions.
+  , racerReturnLast :: Bool
   }
 
 instance Default (Racer [(String,String)] ByteString ByteString) where
@@ -140,6 +145,7 @@ instance Default (Racer [(String,String)] ByteString ByteString) where
     , racerChecker = const True
     , racerProviders = []
     , racerDebug = False
+    , racerReturnLast = False
     }
 
 -- | A `Racer` with some default values.
@@ -197,9 +203,11 @@ delayedTagged xs d t = do
 --
 --         - If the result of the handler passes the checker, cancel all other
 --           requests, and return the result.
---         - If the check fails, go back to waiting for another request to finish.
+--         - If the check fails, go back to waiting for another request to
+--           finish.
 --
---     * If the request fails, go back to waiting for another request to finish.
+--     * If the request fails, go back to waiting for another request to
+--       finish.
 --
 raceGet
   :: (Eq a, CurlHeader ht, CurlBuffer bt)
@@ -216,14 +224,14 @@ raceGetResult
   -> URLString
   -> IO (RacerResult a)
 raceGetResult r url = do
-  asyncs <- fromList <$> (mapM performGetAsync_ (racerProviders r))
+  asyncs <- fromList <$> mapM performGetAsync_ (racerProviders r)
 
   when (racerDebug r) $ do
     TIO.putStr "[racer] Created Asyncs: "
     print . elems $ mapWithKey identifier asyncs
 
   maybeResponse <- waitForOne
-    asyncs (racerHandler r) (racerChecker r) (racerDebug r)
+    asyncs (racerHandler r) (racerChecker r) (racerDebug r) (racerReturnLast r)
 
   pure $ case maybeResponse of
     Nothing -> RacerResult
@@ -249,8 +257,9 @@ waitForOne
   -> RacerHandler ht bt a
   -> RacerChecker a
   -> Bool
+  -> Bool
   -> IO (Maybe (Async (CurlResponse_ ht bt), a))
-waitForOne asyncs handler check debug
+waitForOne asyncs handler check debug returnLast
   = if null asyncs then pure Nothing else do
     winner <- waitAnyCatch (keys asyncs)
 
@@ -258,25 +267,33 @@ waitForOne asyncs handler check debug
       (as, Right a) -> do
         result <- handler a
 
+        let remaining = delete as asyncs
+
         if check result then do
-          cancelAll (keys $ delete as asyncs)
+          cancelAll (keys remaining)
 
           when debug $ do
             TIO.putStr "[racer] Winner: "
             print (asyncThreadId as)
 
           pure $ Just (as, result)
-        else waitForOne (delete as asyncs) handler check debug
-      (as, Left _) -> waitForOne (delete as asyncs) handler check debug
+          else (if returnLast && null remaining
+            then do
+              when debug $ do
+                TIO.putStr "[racer] Reached last. Returning: "
+                print (asyncThreadId as)
+
+              pure $ Just (as, result)
+            else waitForOne remaining handler check debug returnLast
+          )
+      (as, Left _) -> waitForOne
+        (delete as asyncs) handler check debug returnLast
 
 cancelAll :: [Async a] -> IO ()
 cancelAll = mapM_ (async . cancel)
 
-except :: (Eq a) => a -> [a] -> [a]
-except x = filter (x /=)
-
-identifier :: (Async (CurlResponse_ ht bt)) -> ProviderOptions -> Text
-identifier a o = (poTag o) <> ":" <> (pack . show . asyncThreadId $ a)
+identifier :: Async (CurlResponse_ ht bt) -> ProviderOptions -> Text
+identifier a o = poTag o <> ":" <> (pack . show . asyncThreadId $ a)
 
 performGetAsync
   :: (CurlHeader ht, CurlBuffer bt)
