@@ -3,7 +3,7 @@
 -- see: https://github.com/sol/hpack
 
 name:                craze
-version:             0.1.1.0
+version:             0.1.2.0
 synopsis:            HTTP Racing Library
 description:         A micro-library for racing HTTP GET requests
 homepage:            https://github.com/etcinit/craze#readme
