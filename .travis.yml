@@ -16,4 +16,4 @@ cache:
   directories:
     - "$HOME/.stack"
     - .stack-work
-after-success: bash .travis/assemble-docs.sh
+after_success: bash .travis/assemble-docs.sh
