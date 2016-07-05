@@ -8,8 +8,7 @@ addons:
       - libgmp-dev
 env:
   global:
-    secure: FAKE # You should `travis` to set the environment variables used by these scripts.
-before_install: bash .travis/before-install.sh
+  - secure: TI+aW/0jDHijttdHNyng8+H3VUlRSsbSGVETI/AAMqyfjBDzYmttoxEtsd2zzdwHCBrj9+k+nzDnH/lwo8o0WBJzDnimZH9eyGviRIQ6F+mEDdv/BwU2wIsvtgTI6zPlCJMf3A76fcXRSiUwS/m1MuXv3X5q6OL16FqCEWp9/KPfSeRAC58CXXtGXxvzCHj0LAGBXkMaVYV/lQzkEQwksEx8UtWprvjLg5nZ6F2R99ou+i9HYpVxkjjYcT33WjgMXzqQtU0BNt3wKj2js7QRTny3E5M7vYEheEQBvdkZScNNcdxVokQCFJ1bckqJGBnqVJuu30uwGplBdgM8KG6ao7yPb2Bc97NVX2sSycdVL4IifRrhAsuqWY6nziPBVjZpppGgT5JCcl+pl1dUIKwkaj/oqknSLPNPFvUuOMLi/J+g8achom171CplZ20nTA5JkT3l6vzXuIrYQzRG1H2vmuhwv7J76n/0oiFDG+zYt0EQBvs3zt2WkaCcn50gfnV071ca9emRLEHlLDb3dapinRe8V6nvIb6M5lF20kmksZhi8xeih7wSxGjexDDx9KZIZMda7yZpHU3yk1/wu55o6rTxzJgJtJQm+MgNQb5dQJ2QN/6d+4e4sALcpJpVBjDcENDcOZadCkCNU0SNhcchAaly4jCnHplcQmRMDvt9kCU=before_install: bash .travis/before-install.sh
 before_script: mkdir dist
 script: stack test --no-terminal --install-ghc --haddock --coverage --local-bin-path dist --copy-bins
 cache:
