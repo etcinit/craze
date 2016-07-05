@@ -1,0 +1,19 @@
+sudo: required
+services:
+  - docker
+language: c
+addons:
+  apt:
+    packages:
+      - libgmp-dev
+env:
+  global:
+    secure: FAKE # You should `travis` to set the environment variables used by these scripts.
+before_install: bash .travis/before-install.sh
+before_script: mkdir dist
+script: stack test --no-terminal --install-ghc --haddock --coverage --local-bin-path dist --copy-bins
+cache:
+  directories:
+    - "$HOME/.stack"
+    - .stack-work
+after-success: bash .travis/assemble-docs.sh
