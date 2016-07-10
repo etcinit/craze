@@ -46,6 +46,7 @@ module Network.Craze (
     RacerHandler
   , RacerChecker
   , Racer(..)
+  , RacerProvider
   , ProviderOptions(..)
   , RacerResult
   -- * Functions
