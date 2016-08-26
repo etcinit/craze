@@ -1,0 +1,130 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE FlexibleInstances #-}
+<span class="lineno">    2 </span>{-# LANGUAGE OverloadedStrings #-}
+<span class="lineno">    3 </span>
+<span class="lineno">    4 </span>module Network.Craze.Types where
+<span class="lineno">    5 </span>
+<span class="lineno">    6 </span>import Control.Exception (SomeException)
+<span class="lineno">    7 </span>
+<span class="lineno">    8 </span>import Data.ByteString    (ByteString)
+<span class="lineno">    9 </span>import Data.Default.Class (Default, def)
+<span class="lineno">   10 </span>import Data.Text          (Text)
+<span class="lineno">   11 </span>import Network.Curl       (CurlOption, CurlResponse_, respBody)
+<span class="lineno">   12 </span>
+<span class="lineno">   13 </span>-- | A 'RacerHandler' is simply a function for transforming a response after it
+<span class="lineno">   14 </span>-- is received. The handler is only applied to successful requests before they
+<span class="lineno">   15 </span>-- are checked by the 'RacerChecker'.
+<span class="lineno">   16 </span>--
+<span class="lineno">   17 </span>-- This is primarily for extracting or parsing a 'CurlResponse_' before doing
+<span class="lineno">   18 </span>-- any further work. The type returned by the handler will be used as the
+<span class="lineno">   19 </span>-- input of the checker and will be the return type of functions like
+<span class="lineno">   20 </span>-- 'raceGet'.
+<span class="lineno">   21 </span>--
+<span class="lineno">   22 </span>type RacerHandler headerTy bodyTy a = CurlResponse_ headerTy bodyTy -&gt; IO a
+<span class="lineno">   23 </span>
+<span class="lineno">   24 </span>-- | A function that computes whether or not a result is valid or not.
+<span class="lineno">   25 </span>--
+<span class="lineno">   26 </span>-- A racer will discard successful responses it get from its clients if they do
+<span class="lineno">   27 </span>-- not pass the checker.
+<span class="lineno">   28 </span>--
+<span class="lineno">   29 </span>-- This step allows the racer to potentially discard responses that, while
+<span class="lineno">   30 </span>-- technically successful, do not contain the expected result (e.g. APIs that
+<span class="lineno">   31 </span>-- return errors as HTTP 200s, rate limitting messages, or unexpected formats).
+<span class="lineno">   32 </span>--
+<span class="lineno">   33 </span>type RacerChecker a = a -&gt; Bool
+<span class="lineno">   34 </span>
+<span class="lineno">   35 </span>-- | A provider is simply a factory function for 'ProviderOptions', which are
+<span class="lineno">   36 </span>-- used to configure a client.
+<span class="lineno">   37 </span>type RacerProvider = IO ProviderOptions
+<span class="lineno">   38 </span>
+<span class="lineno">   39 </span>-- | Configuration used to set up an individual client in the race.
+<span class="lineno">   40 </span>data ProviderOptions = ProviderOptions
+<span class="lineno">   41 </span>  { -- | Options to pass down to Curl.
+<span class="lineno">   42 </span>    <span class="nottickedoff"><span class="decl"><span class="nottickedoff">poOptions</span></span></span> :: [CurlOption]
+<span class="lineno">   43 </span>    -- | Number of microseconds to delay the request by.
+<span class="lineno">   44 </span>    --
+<span class="lineno">   45 </span>    -- Delays can be used to give other clients a headstart. This is useful
+<span class="lineno">   46 </span>    -- in cases were some clients are more costly to use than others (e.g.
+<span class="lineno">   47 </span>    -- Bandwidth costs, resource usage, etc).
+<span class="lineno">   48 </span>    --
+<span class="lineno">   49 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">poDelay</span></span></span>   :: Maybe Int
+<span class="lineno">   50 </span>    -- | A tag to identify this type provider.
+<span class="lineno">   51 </span>    --
+<span class="lineno">   52 </span>    -- Tags are not required to be unique, but they are generally more helpful
+<span class="lineno">   53 </span>    -- if they are.
+<span class="lineno">   54 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">poTag</span></span></span>     :: Text
+<span class="lineno">   55 </span>  } deriving (<span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Show</span></span></span></span>)
+<span class="lineno">   56 </span>
+<span class="lineno">   57 </span>instance Default ProviderOptions where
+<span class="lineno">   58 </span>  <span class="decl"><span class="istickedoff">def = ProviderOptions</span>
+<span class="lineno">   59 </span><span class="spaces">    </span><span class="istickedoff">{ poOptions = <span class="nottickedoff">[]</span></span>
+<span class="lineno">   60 </span><span class="spaces">    </span><span class="istickedoff">, poDelay = Nothing</span>
+<span class="lineno">   61 </span><span class="spaces">    </span><span class="istickedoff">, poTag = <span class="nottickedoff">&quot;default&quot;</span></span>
+<span class="lineno">   62 </span><span class="spaces">    </span><span class="istickedoff">}</span></span>
+<span class="lineno">   63 </span>
+<span class="lineno">   64 </span>-- | The status of running a single client.
+<span class="lineno">   65 </span>data ClientStatus a
+<span class="lineno">   66 </span>  -- | A successful response (passed the checker). A race will usually only
+<span class="lineno">   67 </span>  -- have one successful response.
+<span class="lineno">   68 </span>  = Successful a
+<span class="lineno">   69 </span>  -- | A response that was received but failed to pass the checker.
+<span class="lineno">   70 </span>  | Failed a
+<span class="lineno">   71 </span>  -- | An exception thrown while using the client.
+<span class="lineno">   72 </span>  | Errored SomeException
+<span class="lineno">   73 </span>  -- | The operation is still pending, was cancelled, or was never started.
+<span class="lineno">   74 </span>  | Pending
+<span class="lineno">   75 </span>  deriving (<span class="decl"><span class="nottickedoff"><span class="decl"><span class="nottickedoff">Show</span></span></span></span>)
+<span class="lineno">   76 </span>
+<span class="lineno">   77 </span>-- | The result of a racing operation. This can be used to collect statistics
+<span class="lineno">   78 </span>-- on which providers win more often, etc.
+<span class="lineno">   79 </span>data RacerResult a = RacerResult
+<span class="lineno">   80 </span>  { <span class="istickedoff"><span class="decl"><span class="istickedoff">rrResponse</span></span></span>  :: Maybe a
+<span class="lineno">   81 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">rrWinner</span></span></span>    :: Maybe ProviderOptions
+<span class="lineno">   82 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">rrProviders</span></span></span> :: [RacerProvider]
+<span class="lineno">   83 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">rrStatuses</span></span></span>  :: [(Text, ClientStatus a)]
+<span class="lineno">   84 </span>  }
+<span class="lineno">   85 </span>
+<span class="lineno">   86 </span>-- | A record describing the rules for racing requests.
+<span class="lineno">   87 </span>data Racer headerTy bodyTy a = Racer
+<span class="lineno">   88 </span>  { <span class="nottickedoff"><span class="decl"><span class="nottickedoff">racerHandler</span></span></span>    :: RacerHandler headerTy bodyTy a
+<span class="lineno">   89 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">racerChecker</span></span></span>    :: RacerChecker a
+<span class="lineno">   90 </span>  -- | On a `Racer`, each `RaceProvider` represents a separate client
+<span class="lineno">   91 </span>  -- configuration. When performing a race, each provider will be used to spwan
+<span class="lineno">   92 </span>  -- a client and perform a request. This allows one to control the number of
+<span class="lineno">   93 </span>  -- requests performed and with which `CurlOption`s.
+<span class="lineno">   94 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">racerProviders</span></span></span>  :: [RacerProvider]
+<span class="lineno">   95 </span>  -- | When set to `True`, debugging messages will be written to stdout.
+<span class="lineno">   96 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">racerDebug</span></span></span>      :: Bool
+<span class="lineno">   97 </span>  -- | When set to `True`, the Racer will attempt to return the last response
+<span class="lineno">   98 </span>  -- in the event that all responses failed to pass the checker. This can be
+<span class="lineno">   99 </span>  -- used for identifying error conditions.
+<span class="lineno">  100 </span>  , <span class="nottickedoff"><span class="decl"><span class="nottickedoff">racerReturnLast</span></span></span> :: Bool
+<span class="lineno">  101 </span>  }
+<span class="lineno">  102 </span>
+<span class="lineno">  103 </span>instance Default (Racer [(String,String)] ByteString ByteString) where
+<span class="lineno">  104 </span>  <span class="decl"><span class="nottickedoff">def = Racer</span>
+<span class="lineno">  105 </span><span class="spaces">    </span><span class="nottickedoff">{ racerHandler = pure . respBody</span>
+<span class="lineno">  106 </span><span class="spaces">    </span><span class="nottickedoff">, racerChecker = const True</span>
+<span class="lineno">  107 </span><span class="spaces">    </span><span class="nottickedoff">, racerProviders = []</span>
+<span class="lineno">  108 </span><span class="spaces">    </span><span class="nottickedoff">, racerDebug = False</span>
+<span class="lineno">  109 </span><span class="spaces">    </span><span class="nottickedoff">, racerReturnLast = False</span>
+<span class="lineno">  110 </span><span class="spaces">    </span><span class="nottickedoff">}</span></span>
+
+</pre>
+</body>
+</html>

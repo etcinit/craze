@@ -1,0 +1,218 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<style type="text/css">
+span.lineno { color: white; background: #aaaaaa; border-right: solid white 12px }
+span.nottickedoff { background: yellow}
+span.istickedoff { background: white }
+span.tickonlyfalse { margin: -1px; border: 1px solid #f20913; background: #f20913 }
+span.tickonlytrue  { margin: -1px; border: 1px solid #60de51; background: #60de51 }
+span.funcount { font-size: small; color: orange; z-index: 2; position: absolute; right: 20 }
+span.decl { font-weight: bold }
+span.spaces    { background: white }
+</style>
+</head>
+<body>
+<pre>
+<span class="lineno">    1 </span>{-# LANGUAGE FlexibleContexts      #-}
+<span class="lineno">    2 </span>{-# LANGUAGE FlexibleInstances     #-}
+<span class="lineno">    3 </span>{-# LANGUAGE GADTs                 #-}
+<span class="lineno">    4 </span>{-# LANGUAGE ImpredicativeTypes    #-}
+<span class="lineno">    5 </span>{-# LANGUAGE MultiParamTypeClasses #-}
+<span class="lineno">    6 </span>{-# LANGUAGE OverloadedStrings     #-}
+<span class="lineno">    7 </span>{-# LANGUAGE RankNTypes            #-}
+<span class="lineno">    8 </span>{-# LANGUAGE RecordWildCards       #-}
+<span class="lineno">    9 </span>
+<span class="lineno">   10 </span>-- | Craze is a small module for performing multiple similar HTTP GET requests
+<span class="lineno">   11 </span>-- in parallel. This is performed through the `raceGet` function, which will
+<span class="lineno">   12 </span>-- perform all the requests and pick the first successful response that passes
+<span class="lineno">   13 </span>-- a certain check, meaning that the parallel requests are essentially racing
+<span class="lineno">   14 </span>-- against each other.
+<span class="lineno">   15 </span>--
+<span class="lineno">   16 </span>-- __What is the usefulness of this?__
+<span class="lineno">   17 </span>--
+<span class="lineno">   18 </span>-- If you are dealing with data source or API that is very unreliable (high
+<span class="lineno">   19 </span>-- latency, random failures) and there are no limitations on performing
+<span class="lineno">   20 </span>-- significantly more requests, then performing multiple requests (through
+<span class="lineno">   21 </span>-- direct connections, proxies, VPNs) may increase the chances of getting a
+<span class="lineno">   22 </span>-- successful response faster and more reliably.
+<span class="lineno">   23 </span>--
+<span class="lineno">   24 </span>-- However, if using a different data source or transport is a possibility, it
+<span class="lineno">   25 </span>-- is potentially a better option that this approach.
+<span class="lineno">   26 </span>--
+<span class="lineno">   27 </span>-- __Examples:__
+<span class="lineno">   28 </span>--
+<span class="lineno">   29 </span>-- Performing two parallel GET requests against https://chromabits.com and
+<span class="lineno">   30 </span>-- returning the status code of the first successful one:
+<span class="lineno">   31 </span>--
+<span class="lineno">   32 </span>-- The providers generate two client configurations. The handler &quot;parses&quot; the
+<span class="lineno">   33 </span>-- response (in this case it just gets the status code). Finally, the checker
+<span class="lineno">   34 </span>-- filters out responses that we don't consider valid (anything that is not
+<span class="lineno">   35 </span>-- HTTP 200 in this case).
+<span class="lineno">   36 </span>--
+<span class="lineno">   37 </span>-- &gt;&gt;&gt; :set -XOverloadedStrings
+<span class="lineno">   38 </span>-- &gt;&gt;&gt; :{
+<span class="lineno">   39 </span>--  let racer = (Racer
+<span class="lineno">   40 </span>--                { racerProviders =
+<span class="lineno">   41 </span>--                    [ simpleTagged [] &quot;Client A&quot;
+<span class="lineno">   42 </span>--                    , simpleTagged [] &quot;Client B&quot;
+<span class="lineno">   43 </span>--                    ]
+<span class="lineno">   44 </span>--                , racerHandler = return . respStatus
+<span class="lineno">   45 </span>--                , racerChecker = (200 ==)
+<span class="lineno">   46 </span>--                , racerDebug = False
+<span class="lineno">   47 </span>--                , racerReturnLast = False
+<span class="lineno">   48 </span>--                } :: Racer [(String, String)] ByteString Int)
+<span class="lineno">   49 </span>--  in (raceGet racer &quot;https://chromabits.com&quot; &gt;&gt;= print)
+<span class="lineno">   50 </span>-- :}
+<span class="lineno">   51 </span>-- Just 200
+<span class="lineno">   52 </span>--
+<span class="lineno">   53 </span>module Network.Craze (
+<span class="lineno">   54 </span>  -- * Types
+<span class="lineno">   55 </span>    RacerHandler
+<span class="lineno">   56 </span>  , RacerChecker
+<span class="lineno">   57 </span>  , Racer(..)
+<span class="lineno">   58 </span>  , RacerProvider
+<span class="lineno">   59 </span>  , ProviderOptions(..)
+<span class="lineno">   60 </span>  , RacerResult(..)
+<span class="lineno">   61 </span>  , ClientStatus(..)
+<span class="lineno">   62 </span>  -- * Functions
+<span class="lineno">   63 </span>  , raceGet
+<span class="lineno">   64 </span>  , raceGetResult
+<span class="lineno">   65 </span>  -- * Providers
+<span class="lineno">   66 </span>  -- $providers
+<span class="lineno">   67 </span>  , simple
+<span class="lineno">   68 </span>  , simpleTagged
+<span class="lineno">   69 </span>  , delayed
+<span class="lineno">   70 </span>  , delayedTagged
+<span class="lineno">   71 </span>  -- * Deprecated
+<span class="lineno">   72 </span>  , defaultRacer
+<span class="lineno">   73 </span>  , defaultProviderOptions
+<span class="lineno">   74 </span>  ) where
+<span class="lineno">   75 </span>
+<span class="lineno">   76 </span>import Control.Monad (when)
+<span class="lineno">   77 </span>import Data.Map.Lazy (keys, lookup)
+<span class="lineno">   78 </span>import Prelude       hiding (lookup)
+<span class="lineno">   79 </span>
+<span class="lineno">   80 </span>import           Control.Concurrent.Async
+<span class="lineno">   81 </span>import           Control.Monad.State      (runStateT)
+<span class="lineno">   82 </span>import           Control.Monad.Trans      (MonadIO, liftIO)
+<span class="lineno">   83 </span>import           Data.ByteString          (ByteString)
+<span class="lineno">   84 </span>import           Data.Default.Class       (def)
+<span class="lineno">   85 </span>import           Data.Text                (Text, pack)
+<span class="lineno">   86 </span>import qualified Data.Text.IO             as TIO
+<span class="lineno">   87 </span>import           Network.Curl
+<span class="lineno">   88 </span>
+<span class="lineno">   89 </span>import Network.Craze.Internal
+<span class="lineno">   90 </span>import Network.Craze.Types
+<span class="lineno">   91 </span>
+<span class="lineno">   92 </span>-- | Perform a GET request on the provided URL using all providers in
+<span class="lineno">   93 </span>-- parallel.
+<span class="lineno">   94 </span>--
+<span class="lineno">   95 </span>-- Rough summary of the algorithm:
+<span class="lineno">   96 </span>--
+<span class="lineno">   97 </span>-- - Start all requests
+<span class="lineno">   98 </span>-- - Wait for a request to finish.
+<span class="lineno">   99 </span>--
+<span class="lineno">  100 </span>--     * If the request is successful, apply the handler on it.
+<span class="lineno">  101 </span>--
+<span class="lineno">  102 </span>--         - If the result of the handler passes the checker, cancel all other
+<span class="lineno">  103 </span>--           requests, and return the result.
+<span class="lineno">  104 </span>--         - If the check fails, go back to waiting for another request to
+<span class="lineno">  105 </span>--           finish.
+<span class="lineno">  106 </span>--
+<span class="lineno">  107 </span>--     * If the request fails, go back to waiting for another request to
+<span class="lineno">  108 </span>--       finish.
+<span class="lineno">  109 </span>--
+<span class="lineno">  110 </span>raceGet
+<span class="lineno">  111 </span>  :: (Eq a, CurlHeader ht, CurlBuffer bt, MonadIO m)
+<span class="lineno">  112 </span>  =&gt; Racer ht bt a
+<span class="lineno">  113 </span>  -&gt; URLString
+<span class="lineno">  114 </span>  -&gt; m (Maybe a)
+<span class="lineno">  115 </span><span class="decl"><span class="istickedoff">raceGet r url = rrResponse &lt;$&gt; raceGetResult r url</span></span>
+<span class="lineno">  116 </span>
+<span class="lineno">  117 </span>-- | Same as @raceGet@, but returns a @RacerResult@ which contains more
+<span class="lineno">  118 </span>-- information about the race performed.
+<span class="lineno">  119 </span>raceGetResult
+<span class="lineno">  120 </span>  :: (Eq a, CurlHeader ht, CurlBuffer bt, MonadIO m)
+<span class="lineno">  121 </span>  =&gt; Racer ht bt a
+<span class="lineno">  122 </span>  -&gt; URLString
+<span class="lineno">  123 </span>  -&gt; m (RacerResult a)
+<span class="lineno">  124 </span><span class="decl"><span class="istickedoff">raceGetResult r@Racer{..} url = do</span>
+<span class="lineno">  125 </span><span class="spaces">  </span><span class="istickedoff">initialState@RaceState{..} &lt;- makeRaceState (pack url) r</span>
+<span class="lineno">  126 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  127 </span><span class="spaces">  </span><span class="istickedoff">let asyncs = keys _rsClientMap</span>
+<span class="lineno">  128 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  129 </span><span class="spaces">  </span><span class="istickedoff">when racerDebug . liftIO $ do</span>
+<span class="lineno">  130 </span><span class="spaces">    </span><span class="istickedoff">TIO.putStr &quot;[racer] Created Asyncs: &quot;</span>
+<span class="lineno">  131 </span><span class="spaces">    </span><span class="istickedoff">print $ asyncThreadId &lt;$&gt; asyncs</span>
+<span class="lineno">  132 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  133 </span><span class="spaces">  </span><span class="istickedoff">(maybeResponse, finalState) &lt;- runStateT waitForOne initialState</span>
+<span class="lineno">  134 </span><span class="spaces"></span><span class="istickedoff"></span>
+<span class="lineno">  135 </span><span class="spaces">  </span><span class="istickedoff">pure $ case maybeResponse of</span>
+<span class="lineno">  136 </span><span class="spaces">    </span><span class="istickedoff">Nothing -&gt; <span class="nottickedoff">RacerResult</span></span>
+<span class="lineno">  137 </span><span class="spaces">      </span><span class="istickedoff"><span class="nottickedoff">{ rrResponse = Nothing</span></span>
+<span class="lineno">  138 </span><span class="spaces">      </span><span class="istickedoff"><span class="nottickedoff">, rrWinner = Nothing</span></span>
+<span class="lineno">  139 </span><span class="spaces">      </span><span class="istickedoff"><span class="nottickedoff">, rrProviders = racerProviders</span></span>
+<span class="lineno">  140 </span><span class="spaces">      </span><span class="istickedoff"><span class="nottickedoff">, rrStatuses = extractStatuses finalState</span></span>
+<span class="lineno">  141 </span><span class="spaces">      </span><span class="istickedoff"><span class="nottickedoff">}</span></span>
+<span class="lineno">  142 </span><span class="spaces">    </span><span class="istickedoff">Just (as, response) -&gt; RacerResult</span>
+<span class="lineno">  143 </span><span class="spaces">      </span><span class="istickedoff">{ rrResponse = Just response</span>
+<span class="lineno">  144 </span><span class="spaces">      </span><span class="istickedoff">, rrWinner = <span class="nottickedoff">_csOptions &lt;$&gt; lookup as _rsClientMap</span></span>
+<span class="lineno">  145 </span><span class="spaces">      </span><span class="istickedoff">, rrProviders = <span class="nottickedoff">racerProviders</span></span>
+<span class="lineno">  146 </span><span class="spaces">      </span><span class="istickedoff">, rrStatuses = <span class="nottickedoff">extractStatuses finalState</span></span>
+<span class="lineno">  147 </span><span class="spaces">      </span><span class="istickedoff">}</span></span>
+<span class="lineno">  148 </span>
+<span class="lineno">  149 </span>-- $providers
+<span class="lineno">  150 </span>--
+<span class="lineno">  151 </span>-- 'RacerProvider' provide client configurations. Craze comes bundled with a
+<span class="lineno">  152 </span>-- few built-in providers which can be used for quickly building client
+<span class="lineno">  153 </span>-- configurations.
+<span class="lineno">  154 </span>
+<span class="lineno">  155 </span>-- | A simple provider. It does not delay requests.
+<span class="lineno">  156 </span>simple :: Monad m =&gt; [CurlOption] -&gt; m ProviderOptions
+<span class="lineno">  157 </span><span class="decl"><span class="istickedoff">simple xs = pure $ def { poOptions = xs }</span></span>
+<span class="lineno">  158 </span>
+<span class="lineno">  159 </span>-- | Like @simple@, but with a tag for identification.
+<span class="lineno">  160 </span>simpleTagged :: Monad m =&gt; [CurlOption] -&gt; Text -&gt; m ProviderOptions
+<span class="lineno">  161 </span><span class="decl"><span class="nottickedoff">simpleTagged xs t = do</span>
+<span class="lineno">  162 </span><span class="spaces">  </span><span class="nottickedoff">opts &lt;- simple xs</span>
+<span class="lineno">  163 </span><span class="spaces">  </span><span class="nottickedoff">pure $ opts { poTag = t }</span></span>
+<span class="lineno">  164 </span>
+<span class="lineno">  165 </span>-- | A provider which will delay a request by the provided number of
+<span class="lineno">  166 </span>-- microseconds.
+<span class="lineno">  167 </span>delayed :: Monad m =&gt; [CurlOption] -&gt; Int -&gt; m ProviderOptions
+<span class="lineno">  168 </span><span class="decl"><span class="istickedoff">delayed xs d = pure $ def</span>
+<span class="lineno">  169 </span><span class="spaces">  </span><span class="istickedoff">{ poOptions = xs</span>
+<span class="lineno">  170 </span><span class="spaces">  </span><span class="istickedoff">, poDelay = Just d</span>
+<span class="lineno">  171 </span><span class="spaces">  </span><span class="istickedoff">}</span></span>
+<span class="lineno">  172 </span>
+<span class="lineno">  173 </span>-- | Like @delayed@, but with a tag for identification.
+<span class="lineno">  174 </span>delayedTagged :: Monad m =&gt; [CurlOption] -&gt; Int -&gt; Text -&gt; m ProviderOptions
+<span class="lineno">  175 </span><span class="decl"><span class="nottickedoff">delayedTagged xs d t = do</span>
+<span class="lineno">  176 </span><span class="spaces">  </span><span class="nottickedoff">opts &lt;- delayed xs d</span>
+<span class="lineno">  177 </span><span class="spaces">  </span><span class="nottickedoff">pure $ opts { poTag = t }</span></span>
+<span class="lineno">  178 </span>
+<span class="lineno">  179 </span>-- | A `Racer` with some default values.
+<span class="lineno">  180 </span>--
+<span class="lineno">  181 </span>-- __Note:__ The handler will extract the response body as a `ByteString` and
+<span class="lineno">  182 </span>-- ignore everything else, hence the type:
+<span class="lineno">  183 </span>--
+<span class="lineno">  184 </span>-- @
+<span class="lineno">  185 </span>-- Racer [(String, String)] ByteString ByteString
+<span class="lineno">  186 </span>-- @
+<span class="lineno">  187 </span>--
+<span class="lineno">  188 </span>-- If this is not the desired behavior, or if the response should be parsed or
+<span class="lineno">  189 </span>-- processed, you should use the `Racer` constructor directly and provide all
+<span class="lineno">  190 </span>-- fields.
+<span class="lineno">  191 </span>defaultRacer :: Racer [(String,String)] ByteString ByteString
+<span class="lineno">  192 </span><span class="decl"><span class="nottickedoff">defaultRacer = def</span></span>
+<span class="lineno">  193 </span>{-# DEPRECATED defaultRacer &quot;Use Data.Default.Class.def instead&quot; #-}
+<span class="lineno">  194 </span>
+<span class="lineno">  195 </span>-- | A default set of options for a provider.
+<span class="lineno">  196 </span>defaultProviderOptions :: ProviderOptions
+<span class="lineno">  197 </span><span class="decl"><span class="nottickedoff">defaultProviderOptions = def</span></span>
+<span class="lineno">  198 </span>{-# DEPRECATED defaultProviderOptions &quot;Use Data.Default.Class.def instead&quot; #-}
+
+</pre>
+</body>
+</html>
