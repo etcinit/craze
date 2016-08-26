@@ -15,6 +15,12 @@ dependencies:
   - bytestring
   - transformers
   - text
+  - mtl
+  - lifted-async
+  - lifted-base
+  - monad-control
+  - transformers-base
+  - lens
 
 library:
   source-dirs: src
