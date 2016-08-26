@@ -79,6 +79,7 @@ import Prelude       hiding (lookup)
 
 import           Control.Concurrent.Async
 import           Control.Monad.State      (runStateT)
+import           Control.Monad.Trans      (MonadIO, liftIO)
 import           Data.ByteString          (ByteString)
 import           Data.Default.Class       (def)
 import           Data.Text                (Text, pack)
@@ -107,25 +108,25 @@ import Network.Craze.Types
 --       finish.
 --
 raceGet
-  :: (Eq a, CurlHeader ht, CurlBuffer bt)
+  :: (Eq a, CurlHeader ht, CurlBuffer bt, MonadIO m)
   => Racer ht bt a
   -> URLString
-  -> IO (Maybe a)
+  -> m (Maybe a)
 raceGet r url = rrResponse <$> raceGetResult r url
 
 -- | Same as @raceGet@, but returns a @RacerResult@ which contains more
 -- information about the race performed.
 raceGetResult
-  :: (Eq a, CurlHeader ht, CurlBuffer bt)
+  :: (Eq a, CurlHeader ht, CurlBuffer bt, MonadIO m)
   => Racer ht bt a
   -> URLString
-  -> IO (RacerResult a)
+  -> m (RacerResult a)
 raceGetResult r@Racer{..} url = do
   initialState@RaceState{..} <- makeRaceState (pack url) r
 
   let asyncs = keys _rsClientMap
 
-  when racerDebug $ do
+  when racerDebug . liftIO $ do
     TIO.putStr "[racer] Created Asyncs: "
     print $ asyncThreadId <$> asyncs
 

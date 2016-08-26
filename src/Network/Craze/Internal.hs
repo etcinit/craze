@@ -53,10 +53,10 @@ extractStatuses RaceState{..} = M.elems $ makeTuple <$>  _rsClientMap
     makeTuple ClientState{..} = (poTag _csOptions, _csStatus)
 
 makeRaceState
-  :: (CurlHeader ht, CurlBuffer bt)
+  :: (CurlHeader ht, CurlBuffer bt, MonadIO m)
   => Text
   -> Racer ht bt a
-  -> IO (RaceState ht bt a)
+  -> m (RaceState ht bt a)
 makeRaceState url Racer{..} = do
   providerMap <- makeClientMap url racerProviders
 
@@ -68,18 +68,18 @@ makeRaceState url Racer{..} = do
     racerReturnLast
 
 makeClientMap
-  :: (CurlHeader ht, CurlBuffer bt)
+  :: (CurlHeader ht, CurlBuffer bt, MonadIO m)
   => Text
   -> [RacerProvider]
-  -> IO (ClientMap ht bt a)
+  -> m (ClientMap ht bt a)
 makeClientMap url providers = M.fromList <$> forM providers (makeClient url)
 
 makeClient
-  :: (CurlHeader ht, CurlBuffer bt)
+  :: (CurlHeader ht, CurlBuffer bt, MonadIO m)
   => Text
   -> RacerProvider
-  -> IO (Async (CurlResponse_ ht bt), ClientState a)
-makeClient url provider = do
+  -> m (Async (CurlResponse_ ht bt), ClientState a)
+makeClient url provider = liftIO $ do
   options <- provider
   future <- async $ performGet url options
 
